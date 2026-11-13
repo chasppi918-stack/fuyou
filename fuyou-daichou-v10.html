@@ -265,7 +265,6 @@ input[type=month]:focus{outline:none}
 @media (max-width:1180px){
   .g4{grid-template-columns:repeat(2,minmax(0,1fr))}
   .pos{grid-template-columns:1fr}
-  .pos>.card:nth-child(2){order:-1;position:static!important}
   .menu-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 .sync-chip{display:none;margin-left:auto;align-items:center;gap:6px;background:none;border:1px solid var(--line2);color:var(--dim);font-size:10px;letter-spacing:.08em;padding:5px 9px;border-radius:999px;cursor:pointer;font-family:inherit;white-space:nowrap}
@@ -514,8 +513,13 @@ function ticketBacks(t){
   if(n){
     hires.forEach(id=>{const st=staffById(id);add(id,'sales',(c.setSum+c.extSum)*(st.tableBackPct||0)/100/n)});
     const nomUnit=id=>{const st=staffById(id);const own=+((st&&st.nominateBack)||0);return own>0?own:+(DB.store.nomBack??500)};
-    if((t.nominates||0)>0)hires.forEach(id=>add(id,'nom',(t.nominates*nomUnit(id))/n));
-    if((t.douhan||0)>0)hires.forEach(id=>add(id,'douhan',((t.douhan)*(DB.store.douhanBack??1000))/n));
+    const dUnit=+(DB.store.douhanBack??1000);
+    const hon=(t.honIds||[]).filter(id=>staffById(id));
+    const dou=(t.douhanIds||[]).filter(id=>staffById(id));
+    if(hon.length){hon.forEach(id=>add(id,'nom',nomUnit(id)))}
+    else if((t.nominates||0)>0){hires.forEach(id=>add(id,'nom',(t.nominates*nomUnit(id))/n))}
+    if(dou.length){dou.forEach(id=>add(id,'douhan',dUnit))}
+    else if((t.douhan||0)>0){hires.forEach(id=>add(id,'douhan',((t.douhan)*dUnit)/n))}
     const champBase=(t.items||[]).filter(it=>it.kind==='champagne').reduce((a,it)=>a+it.price*it.qty,0);
     if(champBase)hires.forEach(id=>add(id,'champ',champBase*CHAMP_BACK_RATE/n));
   }
@@ -830,7 +834,7 @@ function ticketToDraft(t){
   return {bizDate:t.bizDate,table:t.table,castIds:(t.castIds||[]).slice(),customers:t.customers||1,
     extCustomers:t.extCustomers||0,setPrice:setIt?setIt.price:4500,extPrice:extIt?extIt.price:4500,
     lines,foodQty:foodIt?foodIt.qty:0,taxMode:t.taxMode||'10',payment:t.payment||'現金',
-    nominates:t.nominates||0,douhan:t.douhan||0,adjustment:t.adjustment||0,adjustmentNote:t.adjustmentNote||''};
+    nominates:t.nominates||0,douhan:t.douhan||0,honIds:(t.honIds||[]).slice(),douhanIds:(t.douhanIds||[]).slice(),adjustment:t.adjustment||0,adjustmentNote:t.adjustmentNote||''};
 }
 function deleteTicket(id){
   const t=DB.tickets.find(x=>x.id===id); if(!t)return;
@@ -860,7 +864,7 @@ function doVoid(id){
 function newTicket(){
   return {bizDate:bizToday(),table:'A1',castIds:[],customers:2,extCustomers:0,
     setPrice:4500,extPrice:4500,lines:[],foodQty:0,taxMode:DB.store.taxMode||'10',
-    payment:'現金',nominates:0,douhan:0,adjustment:0,adjustmentNote:''};
+    payment:'現金',nominates:0,douhan:0,honIds:[],douhanIds:[],adjustment:0,adjustmentNote:''};
 }
 function buildTicket(p){
   const items=[];
@@ -868,11 +872,13 @@ function buildTicket(p){
   if(p.extCustomers>0)items.push({kind:'ext',name:'延長',price:p.extPrice||0,qty:p.extCustomers});
   (p.lines||[]).forEach(d=>items.push({kind:d.kind,name:LINE_NAME[d.kind]||'その他',price:+d.price||0,qty:d.qty,castId:d.castId||'guest'}));
   if(p.foodQty>0)items.push({kind:'food',name:'フード',price:PRICES.food,qty:p.foodQty});
-  if((p.nominates||0)>0)items.push({kind:'nomfee',name:'指名料',price:+(DB.store.nomFee??1000),qty:p.nominates});
-  if((p.douhan||0)>0)items.push({kind:'douhanfee',name:'同伴料',price:+(DB.store.douhanFee??2000),qty:p.douhan});
+  const honN=(p.honIds||[]).length||(p.nominates||0);
+  const douN=(p.douhanIds||[]).length||(p.douhan||0);
+  if(honN>0)items.push({kind:'nomfee',name:'指名料',price:+(DB.store.nomFee??1000),qty:honN});
+  if(douN>0)items.push({kind:'douhanfee',name:'同伴料',price:+(DB.store.douhanFee??2000),qty:douN});
   return {bizDate:p.bizDate,table:p.table,castIds:(p.castIds||[]).slice(),customers:p.customers,extCustomers:p.extCustomers,
     items,taxMode:p.taxMode,adjustment:+p.adjustment||0,adjustmentNote:p.adjustmentNote||'',
-    nominates:p.nominates||0,douhan:p.douhan||0,payment:p.payment,status:'paid'};
+    nominates:honN,douhan:douN,honIds:(p.honIds||[]).slice(),douhanIds:(p.douhanIds||[]).slice(),payment:p.payment,status:'paid'};
 }
 function posTotalsHTML(c){
   const row=(l,v,cls)=>'<div class="total-row '+(cls||'')+'"><span>'+l+'</span><span class="num">'+v+'</span></div>';
@@ -973,17 +979,22 @@ function renderPos(){
     '</div>'+
 
     '<div class="card" style="position:sticky;top:86px"><div class="card-h"><div><div class="card-e">Checkout</div><div class="card-t">お会計</div></div><span class="tag">'+esc(p.payment)+'</span></div><div class="card-b">'+
-      '<div class="field"><label>指名キャスト（複数可）</label><div class="chips">'+chips+'</div>'+
-        '<div class="hint" style="margin-top:6px">指名なし＝フリーのお客様。シャンパンバックは指名へ均等割。</div></div>'+
+      '<div class="field"><label>接客キャスト（複数可）</label><div class="chips">'+chips+'</div>'+
+        '<div class="hint" style="margin-top:6px">その卓に付いたキャスト全員。テーブルバックとシャンパンバックを均等割します。</div></div>'+
+      '<div class="grid g2" style="gap:10px;margin-top:12px">'+
+        '<div class="field"><label>本指名 <span style="color:#6B6E78;font-size:9.5px">'+yen(DB.store.nomFee||1000)+'/本</span></label>'+
+          '<div class="chips">'+(casts.length?casts.map(x=>'<button class="chip-t'+(((p.honIds||[]).indexOf(x.id)>=0)?' on':'')+'" onclick="posToggleList(\'honIds\',\''+x.id+'\')">'+esc(x.name)+'</button>').join(''):'<span class="hint">先にスタッフを登録</span>')+'</div></div>'+
+        '<div class="field"><label>同伴 <span style="color:#6B6E78;font-size:9.5px">'+yen(DB.store.douhanFee||2000)+'/組</span></label>'+
+          '<div class="chips">'+(casts.length?casts.map(x=>'<button class="chip-t'+(((p.douhanIds||[]).indexOf(x.id)>=0)?' on':'')+'" onclick="posToggleList(\'douhanIds\',\''+x.id+'\')">'+esc(x.name)+'</button>').join(''):'<span class="hint">先にスタッフを登録</span>')+'</div></div>'+
+      '</div>'+
+      '<div class="hint" style="margin-top:6px">本指名・同伴は選んだ本人にバック（'+yen(DB.store.nomBack??500)+'円／'+yen(DB.store.douhanBack??1000)+'円）が入ります。選ばなければ料金もバックも付きません。</div>'+
+      (((p.honIds||[]).length+(p.douhanIds||[]).length)?'<div class="pill-row" style="margin-top:6px">'+((p.honIds||[]).length?'<span class="tag gold">指名 '+p.honIds.map(staffName).join('・')+'</span>':'')+((p.douhanIds||[]).length?'<span class="tag gold">同伴 '+p.douhanIds.map(staffName).join('・')+'</span>':'')+'</div>':'')+
       '<div class="grid g2" style="gap:10px;margin-top:12px">'+
         '<div class="field"><label>消費税</label><select onchange="posSet(\'taxMode\',this.value)"><option value="10"'+(p.taxMode==='10'?' selected':'')+'>10%（10円未満切上）</option><option value="none"'+(p.taxMode!=='10'?' selected':'')+'>無し</option></select></div>'+
         '<div class="field"><label>支払方法</label><select onchange="posSet(\'payment\',this.value)">'+['現金','カード','QR','売掛'].map(x=>'<option'+(p.payment===x?' selected':'')+'>'+x+'</option>').join('')+'</select></div>'+
       '</div>'+
       (p.payment==='カード'?'<div class="hint" style="margin-top:6px;color:#CBA96B">カードは 1.05% 増し（10円未満切上）。お客様負担です。</div>':'')+
-      '<div class="grid g2" style="gap:10px;margin-top:10px">'+
-        '<div class="field"><label>本指名 <span style="color:#6B6E78;font-size:9.5px">'+yen(DB.store.nomFee||1000)+'/本</span></label><div class="stepper" style="width:fit-content"><button onclick="posSet(\'nominates\',Math.max(0,'+(p.nominates-1)+'))">−</button><span class="v num">'+p.nominates+'</span><button onclick="posSet(\'nominates\','+(p.nominates+1)+')">＋</button></div></div>'+
-        '<div class="field"><label>同伴 <span style="color:#6B6E78;font-size:9.5px">'+yen(DB.store.douhanFee||2000)+'/組</span></label><div class="stepper" style="width:fit-content"><button onclick="posSet(\'douhan\',Math.max(0,'+((p.douhan||0)-1)+'))">−</button><span class="v num">'+(p.douhan||0)+'</span><button onclick="posSet(\'douhan\','+((p.douhan||0)+1)+')">＋</button></div></div>'+
-      '</div>'+
+
       '<div id="posTotals" style="margin-top:14px">'+posTotalsHTML(c)+'</div>'+
       '<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">'+
         '<div class="tiny" style="margin-bottom:6px">金額の増減（税後・バック対象外）</div>'+
@@ -1008,6 +1019,15 @@ function refreshPosTotals(){
   const btn=document.getElementById('posCheckoutBtn'); if(btn){btn.textContent='会計する　'+yen(c.total);btn.disabled=!(c.sub>0)}
 }
 function posSet(k,v){state.pos[k]=v; if(k==='customers'&&state.pos.extCustomers>v)state.pos.extCustomers=v; renderPos()}
+function posToggleList(k,id){
+  const p=state.pos; if(!p)return;
+  if(!p[k])p[k]=[];
+  const i=p[k].indexOf(id);
+  if(i>=0)p[k].splice(i,1); else p[k].push(id);
+  if(k==='honIds'){p.nominates=p[k].length}
+  if(k==='douhanIds'){p.douhan=p[k].length}
+  renderPos();
+}
 function posToggleCast(id){
   const p=state.pos; if(!p.castIds)p.castIds=[];
   if(id==='none'){p.castIds=[]}
