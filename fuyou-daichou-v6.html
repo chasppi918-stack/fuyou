@@ -1622,7 +1622,7 @@ function render(){
       if(row){
         var take=confirm('クラウドに既存のデータがあります。\n\nOK：クラウドのデータを読み込む\nキャンセル：この端末のデータで上書きする');
         if(take){
-          DBV()=row.data;revSave(row.rev);lsSet('miyano.chouba.v4',JSON.stringify(DBV()));
+          window.DB=row.data;revSave(row.rev);lsSet('miyano.chouba.v4',JSON.stringify(DBV()));
           setState('ok');closeModal();render();toast('クラウドのデータを読み込みました');return;
         }
         revSave(row.rev);
@@ -1637,7 +1637,7 @@ function render(){
     setState('syncing');
     pull().then(function(row){
       if(row&&row.rev>S.rev&&row.data){
-        DBV()=row.data;revSave(row.rev);lsSet('miyano.chouba.v4',JSON.stringify(DBV()));
+        window.DB=row.data;revSave(row.rev);lsSet('miyano.chouba.v4',JSON.stringify(DBV()));
         setState('ok');S.last=new Date();render();
         if(!silent)toast('クラウドの最新データを読み込みました');
         return;
@@ -1654,7 +1654,7 @@ function render(){
   function takeRemote(){
     pull().then(function(row){
       if(!row)return;
-      DBV()=row.data;revSave(row.rev);lsSet('miyano.chouba.v4',JSON.stringify(DBV()));
+      window.DB=row.data;revSave(row.rev);lsSet('miyano.chouba.v4',JSON.stringify(DBV()));
       setState('ok');render();toast('クラウドのデータを読み込みました');
     }).catch(function(e){toast(e.message,1)});
   }
